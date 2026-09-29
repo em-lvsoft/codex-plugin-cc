@@ -16,17 +16,11 @@ import {
 import { loadState, removeJobArtifacts, resolveStateFile, updateState } from "./lib/state.mjs";
 import { TRANSCRIPT_PATH_ENV } from "./lib/claude-session-transfer.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
+import { readHookInput } from "./lib/hook-stdin.mjs";
 
 export const SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
 const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
-
-function readHookInput() {
-  const raw = fs.readFileSync(0, "utf8").trim();
-  if (!raw) {
-    return {};
-  }
-  return JSON.parse(raw);
-}
+const HOOK_STDIN_TIMEOUT_MS = 1000;
 
 function shellEscape(value) {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
@@ -161,7 +155,9 @@ async function handleSessionEnd(input) {
 }
 
 async function main() {
-  const input = readHookInput();
+  // Timed read: a blocking readFileSync(0) throws EAGAIN on non-blocking pipes and can
+  // hang on Windows when the write end stays open. SessionEnd only gets ~3s in total.
+  const input = await readHookInput(HOOK_STDIN_TIMEOUT_MS);
   const eventName = process.argv[2] ?? input.hook_event_name ?? "";
 
   if (eventName === "SessionStart") {
