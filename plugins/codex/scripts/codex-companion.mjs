@@ -513,13 +513,18 @@ async function executeTaskRun(request) {
   }
 
   const persistThread = request.persistThread ?? true;
+  const taskSandbox = request.sandbox ?? defaultTaskSandbox(Boolean(request.write));
   const result = await runAppServerTurn(workspaceRoot, {
     resumeThreadId,
     prompt: request.prompt,
     defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
     model: request.model,
     effort: request.effort,
-    sandbox: request.sandbox ?? defaultTaskSandbox(Boolean(request.write)),
+    sandbox: taskSandbox,
+    // Codex on Windows treats workspace-write as read-only under approvalPolicy "never"
+    // (#412), so write runs need "on-request". read-only has nothing to escalate and
+    // danger-full-access has no sandbox to escalate out of.
+    approvalPolicy: taskSandbox === "workspace-write" ? "on-request" : "never",
     onProgress: request.onProgress,
     persistThread,
     threadName: resumeThreadId || !persistThread ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
