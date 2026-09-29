@@ -26,11 +26,79 @@ function shellEscape(value) {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
 }
 
-function appendEnvVar(name, value) {
-  if (!process.env.CLAUDE_ENV_FILE || value == null || value === "") {
+const MANAGED_ENV_VARS = [SESSION_ID_ENV, TRANSCRIPT_PATH_ENV, PLUGIN_DATA_ENV];
+
+function isManagedExport(line) {
+  if (MANAGED_ENV_VARS.some((name) => line.startsWith(`export ${name}=`))) {
+    return true;
+  }
+  // Older versions of this plugin exported the host's generic CLAUDE_PLUGIN_DATA. Other
+  // plugins may write that name too, so only drop the line when it carries our value.
+  const hostDataDir = process.env[HOST_PLUGIN_DATA_ENV];
+  return Boolean(hostDataDir) && line === `export ${HOST_PLUGIN_DATA_ENV}=${shellEscape(hostDataDir)}`;
+}
+
+// Rewrite this plugin's exports instead of appending them. SessionStart fires on
+// startup, on resume and on every compaction, so appending grew CLAUDE_ENV_FILE by
+// three lines every time and nothing ever pruned it. Only the last assignment of a
+// name takes effect, so every earlier copy did nothing but grow the file. Claude Code
+// inlines the whole file into the single `bash -c <script>` argument, so a long-running
+// session eventually pushed that argument past the operating system's limit on the
+// length of one argument, and no shell could be started at all.
+function writeManagedEnvVars(entries) {
+  const envFile = process.env.CLAUDE_ENV_FILE;
+  if (!envFile) {
     return;
   }
-  fs.appendFileSync(process.env.CLAUDE_ENV_FILE, `export ${name}=${shellEscape(value)}\n`, "utf8");
+
+  let existing = "";
+  try {
+    existing = fs.readFileSync(envFile, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  const existingLines = existing.split(/\r?\n/).filter((line) => line !== "");
+  const managedLines = existingLines.filter(isManagedExport);
+  const wanted = entries
+    .filter(([, value]) => value != null && value !== "")
+    .map(([name, value]) => `export ${name}=${shellEscape(value)}`);
+
+  // Already exactly what we want: leave the file alone.
+  if (managedLines.length === wanted.length && wanted.every((line) => managedLines.includes(line))) {
+    return;
+  }
+
+  // Nothing of ours yet: append. SessionStart hooks of several plugins run in parallel,
+  // and an append cannot drop a line a sibling plugin writes at the same moment.
+  if (managedLines.length === 0) {
+    if (wanted.length > 0) {
+      const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
+      fs.appendFileSync(envFile, `${separator}${wanted.join("\n")}\n`, "utf8");
+    }
+    return;
+  }
+
+  // Stale or duplicated exports of ours: rewrite, keeping every other plugin's line verbatim.
+  const lines = [...existingLines.filter((line) => !isManagedExport(line)), ...wanted];
+  const next = lines.length > 0 ? `${lines.join("\n")}\n` : "";
+
+  // Write and rename, so that a reader never sees a half-written file. Fall back to a
+  // direct write if Windows refuses the rename because the file is open elsewhere.
+  const tmpFile = `${envFile}.${process.pid}.tmp`;
+  fs.writeFileSync(tmpFile, next, "utf8");
+  try {
+    fs.renameSync(tmpFile, envFile);
+  } catch {
+    fs.writeFileSync(envFile, next, "utf8");
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      // Ignore cleanup failures for the temp file.
+    }
+  }
 }
 
 function cleanupSessionJobs(cwd, sessionId) {
@@ -111,9 +179,11 @@ function hasOtherActiveSessionJobs(cwd, sessionId) {
 }
 
 function handleSessionStart(input) {
-  appendEnvVar(SESSION_ID_ENV, input.session_id);
-  appendEnvVar(TRANSCRIPT_PATH_ENV, input.transcript_path);
-  appendEnvVar(PLUGIN_DATA_ENV, process.env[HOST_PLUGIN_DATA_ENV]);
+  writeManagedEnvVars([
+    [SESSION_ID_ENV, input.session_id],
+    [TRANSCRIPT_PATH_ENV, input.transcript_path],
+    [PLUGIN_DATA_ENV, process.env[HOST_PLUGIN_DATA_ENV]]
+  ]);
 }
 
 async function handleSessionEnd(input) {
