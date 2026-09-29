@@ -29,7 +29,10 @@ export function readHookInput(timeoutMs = 5000) {
       process.stdin.removeListener("end", onEnd);
       process.stdin.removeListener("error", onError);
       try {
+        // pause() alone keeps the pipe handle referenced, so the process would still
+        // wait for an EOF that may never come. Hooks read stdin once; release it.
         process.stdin.pause();
+        process.stdin.destroy();
       } catch {
         // ignore
       }
