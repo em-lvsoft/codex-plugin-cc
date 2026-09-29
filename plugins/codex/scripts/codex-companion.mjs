@@ -79,6 +79,10 @@ const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
 // A foreground task waits on its detached worker; poll quickly so the result comes back
 // as soon as the worker records it instead of up to a status-poll interval later.
 const TASK_WAIT_POLL_INTERVAL_MS = 250;
+// Dynamic tool progress (#625) is logged but kept off stderr. The foreground wait replays
+// the job log to stderr, where that flag is gone, so match those log lines instead.
+// MCP tool lines ("Tool server/tool ...") carry a slash and stay visible.
+const HIDDEN_TOOL_PROGRESS_LINE = /^\[[^\]]*\] (?:Running tool: [^/]+\.|Tool [^/\s]+ [A-Za-z]+\.)$/;
 const VALID_REASONING_EFFORTS = new Set([
   "none",
   "minimal",
@@ -632,6 +636,7 @@ async function waitForTaskCompletion(cwd, jobId, { timeoutMs, logFile, stderr })
       return 0;
     }
   };
+  let pending = "";
   const tail = () => {
     if (!stderr || !logFile) {
       return;
@@ -639,9 +644,16 @@ async function waitForTaskCompletion(cwd, jobId, { timeoutMs, logFile, stderr })
     try {
       const stat = fs.statSync(logFile);
       if (stat.size > logOffset) {
-        const stream = fs.readFileSync(logFile, "utf8").slice(logOffset);
+        // Offsets are bytes: slice the buffer, not the decoded string, so non-ASCII
+        // log text neither repeats nor drops output.
+        const chunk = fs.readFileSync(logFile).subarray(logOffset, stat.size).toString("utf8");
         logOffset = stat.size;
-        process.stderr.write(stream);
+        const lines = (pending + chunk).split("\n");
+        pending = lines.pop();
+        const visible = lines.filter((line) => !HIDDEN_TOOL_PROGRESS_LINE.test(line.trimEnd()));
+        if (visible.length > 0) {
+          process.stderr.write(`${visible.join("\n")}\n`);
+        }
       }
     } catch {
       // The worker may not have created the file yet.
@@ -667,6 +679,9 @@ async function waitForTaskCompletion(cwd, jobId, { timeoutMs, logFile, stderr })
     }
   }
   tail();
+  if (stderr && pending && !HIDDEN_TOOL_PROGRESS_LINE.test(pending.trimEnd())) {
+    process.stderr.write(`${pending}\n`);
+  }
   return { ...snapshot, waitTimedOut: isActiveJobStatus(snapshot.job.status) };
 }
 
