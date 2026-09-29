@@ -799,6 +799,51 @@ test("task --resume-last resumes the latest persisted task thread", () => {
   assert.equal(result.stdout, "Resumed the prior run.\nFollow-up prompt accepted.\n");
 });
 
+test("task --resume-last survives Claude session end and resume", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir);
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+
+  const env = {
+    ...buildEnv(binDir),
+    CODEX_COMPANION_SESSION_ID: "sess-resumed"
+  };
+  const firstRun = run("node", [SCRIPT, "task", "initial task"], {
+    cwd: repo,
+    env
+  });
+  assert.equal(firstRun.status, 0, firstRun.stderr);
+
+  const sessionEnd = run("node", [SESSION_HOOK, "SessionEnd"], {
+    cwd: repo,
+    env,
+    input: JSON.stringify({
+      hook_event_name: "SessionEnd",
+      session_id: "sess-resumed",
+      cwd: repo
+    })
+  });
+  assert.equal(sessionEnd.status, 0, sessionEnd.stderr);
+
+  const candidate = run("node", [SCRIPT, "task-resume-candidate", "--json"], {
+    cwd: repo,
+    env
+  });
+  assert.equal(candidate.status, 0, candidate.stderr);
+  assert.equal(JSON.parse(candidate.stdout).available, true);
+
+  const resumedRun = run("node", [SCRIPT, "task", "--resume-last", "follow up"], {
+    cwd: repo,
+    env
+  });
+  assert.equal(resumedRun.status, 0, resumedRun.stderr);
+  assert.equal(resumedRun.stdout, "Resumed the prior run.\nFollow-up prompt accepted.\n");
+});
+
 test("task-resume-candidate returns the latest rescue thread from the current session", () => {
   const workspace = makeTempDir();
   const stateDir = resolveStateDir(workspace);
@@ -2495,7 +2540,7 @@ test("cancel sends turn interrupt to the shared app-server before killing a brok
   assert.equal(cleanup.status, 0, cleanup.stderr);
 });
 
-test("session end fully cleans up jobs for the ending session", async (t) => {
+test("session end stops active jobs but retains completed jobs for resume", async (t) => {
   const repo = makeTempDir();
   initGitRepo(repo);
   fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
@@ -2599,7 +2644,12 @@ test("session end fully cleans up jobs for the ending session", async (t) => {
   assert.equal(fs.existsSync(otherJobFile), true);
   assert.deepEqual(
     fs.readdirSync(path.dirname(otherJobFile)).sort(),
-    [path.basename(otherJobFile), path.basename(otherSessionLog)].sort()
+    [
+      path.basename(completedJobFile),
+      path.basename(completedLog),
+      path.basename(otherJobFile),
+      path.basename(otherSessionLog)
+    ].sort()
   );
 
   await waitFor(() => {
@@ -2612,9 +2662,15 @@ test("session end fully cleans up jobs for the ending session", async (t) => {
   });
 
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
-  assert.deepEqual(state.jobs.map((job) => job.id), ["review-other"]);
-  const otherJob = state.jobs[0];
+  assert.deepEqual(state.jobs.map((job) => job.id), ["review-other", "review-completed"]);
+  const otherJob = state.jobs.find((job) => job.id === "review-other");
   assert.equal(otherJob.logFile, otherSessionLog);
+  const completedJob = state.jobs.find((job) => job.id === "review-completed");
+  assert.equal(completedJob.logFile, completedLog);
+  assert.equal(fs.existsSync(completedLog), true);
+  assert.equal(fs.existsSync(completedJobFile), true);
+  assert.equal(fs.existsSync(runningLog), false);
+  assert.equal(fs.existsSync(runningJobFile), false);
 });
 
 test("stop hook runs a stop-time review task and blocks on findings when the review gate is enabled", () => {
@@ -3233,21 +3289,20 @@ test("session end preserves shared broker while another session has active jobs"
     "broker/shutdown must not be sent while another session has active jobs"
   );
   assert.equal(fs.existsSync(currentLog), false);
-  assert.equal(fs.existsSync(completedLog), false);
   assert.equal(fs.existsSync(currentJobFile), false);
-  assert.equal(fs.existsSync(completedJobFile), false);
+  // Finished jobs survive SessionEnd so a reopened session can still resume them (#567).
+  assert.equal(fs.existsSync(completedLog), true);
+  assert.equal(fs.existsSync(completedJobFile), true);
   assert.equal(fs.existsSync(otherLog), true);
   assert.equal(fs.existsSync(otherJobFile), true);
 
   let state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
-  assert.deepEqual(state.jobs.map((job) => job.id), ["task-other"]);
-  assert.equal(state.jobs[0].status, "running");
+  assert.deepEqual(state.jobs.map((job) => job.id).sort(), ["task-current-completed", "task-other"]);
+  assert.equal(state.jobs.find((job) => job.id === "task-other").status, "running");
 
-  state.jobs[0] = {
-    ...state.jobs[0],
-    status: "completed",
-    updatedAt: "2026-03-18T15:36:00.000Z"
-  };
+  state.jobs = state.jobs.map((job) =>
+    job.id === "task-other" ? { ...job, status: "completed", updatedAt: "2026-03-18T15:36:00.000Z" } : job
+  );
   fs.writeFileSync(path.join(stateDir, "state.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 
   const lastEnd = run("node", [SESSION_HOOK, "SessionEnd"], {
@@ -3268,15 +3323,15 @@ test("session end preserves shared broker while another session has active jobs"
     receivedMethods().includes("broker/shutdown"),
     "the last session out must actually request broker shutdown"
   );
-  assert.equal(fs.existsSync(otherLog), false);
-  assert.equal(fs.existsSync(otherJobFile), false);
+  assert.equal(fs.existsSync(otherLog), true);
+  assert.equal(fs.existsSync(otherJobFile), true);
   assert.equal(fs.existsSync(pidFile), false);
   assert.equal(fs.existsSync(logFile), false);
 
   await waitFor(() => !isProcessAlive(brokerProcess.pid));
 
   state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
-  assert.deepEqual(state.jobs, []);
+  assert.deepEqual(state.jobs.map((job) => job.id).sort(), ["task-current-completed", "task-other"]);
 });
 
 test("task terminates when app-server emits a non-retryable turn error", () => {

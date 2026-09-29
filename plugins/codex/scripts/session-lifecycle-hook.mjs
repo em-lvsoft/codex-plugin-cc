@@ -113,19 +113,18 @@ function cleanupSessionJobs(cwd, sessionId) {
   }
 
   const state = loadState(workspaceRoot);
-  const removedJobs = state.jobs.filter((job) => job.sessionId === sessionId);
+  const removedJobs = state.jobs.filter(
+    (job) => job.sessionId === sessionId && (job.status === "queued" || job.status === "running")
+  );
   if (removedJobs.length === 0) {
     return;
   }
 
   for (const job of removedJobs) {
-    const stillRunning = job.status === "queued" || job.status === "running";
-    if (stillRunning) {
-      try {
-        terminateProcessTree(job.pid ?? Number.NaN);
-      } catch {
-        // Ignore teardown failures during session shutdown.
-      }
+    try {
+      terminateProcessTree(job.pid ?? Number.NaN);
+    } catch {
+      // Ignore teardown failures during session shutdown.
     }
     // We own these jobs and are deliberately removing them. saveState's GC
     // now protects active jobs' files (for other sessions' sake), so delete
@@ -137,7 +136,11 @@ function cleanupSessionJobs(cwd, sessionId) {
   // This prevents a concurrent upsertJob from being silently dropped (and its
   // artifacts deleted) when the stale snapshot loaded above is saved back.
   updateState(workspaceRoot, (currentState) => {
-    currentState.jobs = currentState.jobs.filter((job) => job.sessionId !== sessionId);
+    // Keep finished jobs so /codex:rescue --resume can find the thread after the
+    // session is reopened (#567); only this session's active jobs go away.
+    currentState.jobs = currentState.jobs.filter(
+      (job) => job.sessionId !== sessionId || (job.status !== "queued" && job.status !== "running")
+    );
   });
 }
 

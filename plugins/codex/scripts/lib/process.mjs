@@ -102,13 +102,15 @@ export function terminateProcessTree(pid, options = {}) {
       return { attempted: true, delivered: true, method: "taskkill", result };
     }
 
-    if (result.error?.code === "ENOENT") {
+    // taskkill ran but the root survived, or taskkill is missing: kill the root directly.
+    if (!result.error || result.error.code === "ENOENT") {
+      const detail = result.error ? {} : { result };
       try {
         killImpl(pid);
-        return { attempted: true, delivered: true, method: "kill" };
+        return { attempted: true, delivered: true, method: "kill", ...detail };
       } catch (error) {
         if (error?.code === "ESRCH") {
-          return { attempted: true, delivered: false, method: "kill" };
+          return { attempted: true, delivered: false, method: "kill", ...detail };
         }
         throw error;
       }
@@ -118,7 +120,6 @@ export function terminateProcessTree(pid, options = {}) {
       throw result.error;
     }
 
-    throw new Error(formatCommandFailure(result));
   }
 
   try {

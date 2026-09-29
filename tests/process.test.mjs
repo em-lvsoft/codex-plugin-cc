@@ -108,7 +108,9 @@ test("terminateProcessTree reports delivery when taskkill only failed on already
   assert.equal(livenessChecks, 2);
 });
 
-test("terminateProcessTree still throws when taskkill fails and the root process survives", () => {
+test("terminateProcessTree still throws when taskkill fails and the root process cannot be killed", () => {
+  // taskkill was denied and the root is still alive: the direct-kill fallback runs,
+  // and its access error surfaces instead of being reported as delivered.
   assert.throws(
     () =>
       terminateProcessTree(1234, {
@@ -126,10 +128,15 @@ test("terminateProcessTree still throws when taskkill fails and the root process
         },
         killImpl(pid, signal) {
           assert.equal(pid, 1234);
-          assert.equal(signal, 0);
+          if (signal === 0) {
+            return;
+          }
+          const error = new Error("EPERM");
+          error.code = "EPERM";
+          throw error;
         }
       }),
-    /could not be terminated/
+    /EPERM/
   );
 });
 
@@ -244,4 +251,31 @@ test("terminateProcessTree leaves the non-Windows process-group path unchanged",
     delivered: true,
     method: "process-group"
   });
+});
+
+test("terminateProcessTree falls back to the root process when taskkill only partially succeeds", () => {
+  let killedPid = null;
+  const outcome = terminateProcessTree(1234, {
+    platform: "win32",
+    runCommandImpl(command, args) {
+      return {
+        command,
+        args,
+        status: 128,
+        signal: null,
+        stdout: "",
+        stderr: "A child process could not be terminated.",
+        error: null
+      };
+    },
+    killImpl(pid) {
+      killedPid = pid;
+    }
+  });
+
+  assert.equal(killedPid, 1234);
+  assert.equal(outcome.attempted, true);
+  assert.equal(outcome.delivered, true);
+  assert.equal(outcome.method, "kill");
+  assert.equal(outcome.result.status, 128);
 });
