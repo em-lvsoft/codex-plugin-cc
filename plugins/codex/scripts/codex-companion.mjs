@@ -264,7 +264,8 @@ function buildNativeReviewTarget(target) {
   }
 
   if (target.mode === "branch") {
-    return { type: "baseBranch", branch: target.baseRef };
+    const branch = target.nativeBaseRef ?? (target.baseRef.startsWith("-") ? target.baseCommit : target.baseRef);
+    return { type: "baseBranch", branch };
   }
 
   return null;
