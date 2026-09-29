@@ -171,7 +171,7 @@ export function parseCommandInput(argv, config = {}) {
 // prompt. Only the documented long `--model` form selects a model. See #699.
 export function parseTaskArgv(argv) {
   return parseCommandInput(argv, {
-    valueOptions: ["model", "effort", "cwd", "prompt-file", "sandbox"],
+    valueOptions: ["model", "effort", "cwd", "prompt-file", "sandbox", "resume-thread"],
     booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background", "stop-gate"],
     leadingOnlyOptions: ["sandbox"]
   });
