@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
-import { initGitRepo, makeTempDir, run } from "./helpers.mjs";
+import { cleanupTempWorkspaces, initGitRepo, makeTempDir, run } from "./helpers.mjs";
 import {
   createBrokerSessionDir,
   loadBrokerSession,
@@ -33,6 +33,31 @@ function isProcessAlive(pid) {
     return error?.code !== "ESRCH";
   }
 }
+
+// Companion invocations start a broker that is deliberately long-lived so it
+// can be reused. Nothing else shuts it down, so without this the suite leaves a
+// broker plus its app-server child behind for every workspace it touches.
+//
+// ROOT is a stable workspace a developer may already have a live companion
+// session on, so it is only torn down when this run is the thing that started
+// it: the session is sampled before any test and stopped only if it changed.
+const rootBrokerPidBeforeRun = readRootBrokerPid();
+
+function readRootBrokerPid() {
+  try {
+    return loadBrokerSession(ROOT)?.pid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+after(() => {
+  const rootBrokerPidAfterRun = readRootBrokerPid();
+  const startedRootBroker =
+    rootBrokerPidAfterRun !== null && rootBrokerPidAfterRun !== rootBrokerPidBeforeRun;
+
+  cleanupTempWorkspaces(startedRootBroker ? [ROOT] : []);
+});
 
 async function waitFor(predicate, { timeoutMs = 5000, intervalMs = 50 } = {}) {
   const start = Date.now();
