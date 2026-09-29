@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createBrokerEndpoint, parseBrokerEndpoint } from "./broker-endpoint.mjs";
 import { resolveStateDir } from "./state.mjs";
+import { terminateProcessTree } from "./process.mjs";
 
 export const PID_FILE_ENV = "CODEX_COMPANION_APP_SERVER_PID_FILE";
 export const LOG_FILE_ENV = "CODEX_COMPANION_APP_SERVER_LOG_FILE";
@@ -115,6 +116,17 @@ async function isBrokerEndpointReady(endpoint) {
   }
 }
 
+function pidFileNames(pidFile, pid) {
+  if (!pidFile || !Number.isFinite(pid)) {
+    return false;
+  }
+  try {
+    return Number.parseInt(fs.readFileSync(pidFile, "utf8").trim(), 10) === pid;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensureBrokerSession(cwd, options = {}) {
   const existing = loadBrokerSession(cwd);
   if (existing && (await isBrokerEndpointReady(existing.endpoint))) {
@@ -127,8 +139,11 @@ export async function ensureBrokerSession(cwd, options = {}) {
       pidFile: existing.pidFile ?? null,
       logFile: existing.logFile ?? null,
       sessionDir: existing.sessionDir ?? null,
-      pid: existing.pid ?? null,
-      killProcess: options.killProcess ?? null
+      // A recorded broker from an earlier run may be long gone and its pid reused
+      // (Windows recycles pids aggressively). The broker removes its pid file on a
+      // clean exit, so only kill when the pid file still names that same pid.
+      pid: pidFileNames(existing.pidFile, existing.pid) ? existing.pid : null,
+      killProcess: options.killProcess ?? terminateProcessTree
     });
     clearBrokerSession(cwd);
   }
@@ -159,7 +174,7 @@ export async function ensureBrokerSession(cwd, options = {}) {
       logFile,
       sessionDir,
       pid: child.pid ?? null,
-      killProcess: options.killProcess ?? null
+      killProcess: options.killProcess ?? terminateProcessTree
     });
     return null;
   }
@@ -175,7 +190,11 @@ export async function ensureBrokerSession(cwd, options = {}) {
   return session;
 }
 
-export function teardownBrokerSession({ endpoint = null, pidFile, logFile, sessionDir = null, pid = null, killProcess = null }) {
+export function teardownBrokerSession({ endpoint = null, pidFile, logFile, sessionDir = null, pid = null, killProcess = terminateProcessTree }) {
+  // The broker is spawned detached and unref'd so it can outlive the process that
+  // started it. That makes termination here mandatory rather than optional: this
+  // function also unlinks the pid file, so a broker left running after its pid file
+  // is gone can never be found again by anything.
   if (Number.isFinite(pid) && killProcess) {
     try {
       killProcess(pid);
