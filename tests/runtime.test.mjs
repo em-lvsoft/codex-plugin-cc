@@ -23,6 +23,7 @@ const PLUGIN_ROOT = path.join(ROOT, "plugins", "codex");
 const SCRIPT = path.join(PLUGIN_ROOT, "scripts", "codex-companion.mjs");
 const STOP_HOOK = path.join(PLUGIN_ROOT, "scripts", "stop-review-gate-hook.mjs");
 const SESSION_HOOK = path.join(PLUGIN_ROOT, "scripts", "session-lifecycle-hook.mjs");
+const FAKE_AUTH_BROKER = path.join(ROOT, "tests", "fake-auth-broker.mjs");
 
 function isProcessAlive(pid) {
   try {
@@ -43,6 +44,36 @@ async function waitFor(predicate, { timeoutMs = 5000, intervalMs = 50 } = {}) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   throw new Error("Timed out waiting for condition.");
+}
+
+async function startFakeAuthBroker(t, mode = "busy") {
+  const sessionDir = makeTempDir("codex-plugin-auth-broker-");
+  const endpoint = createBrokerEndpoint(sessionDir);
+  const statePath = path.join(sessionDir, "state.json");
+  const child = spawn(
+    process.execPath,
+    [FAKE_AUTH_BROKER, "--endpoint", endpoint, "--state", statePath, "--mode", mode],
+    { stdio: "ignore", windowsHide: true }
+  );
+
+  t.after(() => {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+    }
+  });
+
+  await waitFor(() => {
+    if (!fs.existsSync(statePath)) {
+      return false;
+    }
+    try {
+      return JSON.parse(fs.readFileSync(statePath, "utf8")).ready;
+    } catch {
+      return false;
+    }
+  });
+
+  return { endpoint, statePath };
 }
 
 test("setup reports ready when fake codex is installed and authenticated", () => {
