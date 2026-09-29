@@ -37,7 +37,9 @@ Forwarding rules:
 - If the user asks for a concrete model name such as `gpt-5.4-mini`, pass it through with `--model`.
 - Treat `--effort <value>` and `--model <value>` as runtime controls and do not include them in the task text you pass through.
 - If the user passes `--sandbox <read-only|workspace-write|danger-full-access>` before the task text, forward it in that position and do not add `--write`; the sandbox already decides whether Codex may edit. A `--sandbox` inside the task text is part of the prompt: leave it there. Never add a `--sandbox` on your own.
-- Otherwise default to a write-capable Codex run by adding `--write` unless the user explicitly asks for read-only behavior or only wants review, diagnosis, or research without edits.
+- `--background` and `--wait` are Claude-side execution controls. Always strip them from the task text and never forward them to `task`.
+- Treat `--cwd <path>` as a routing control: strip it from the task text and pass it through to `task` as `--cwd <path>`. It targets the Codex run at a specific working tree (typically an isolated git worktree) so parallel rescue runs never collide; the companion's job state and `--resume-last` threads are scoped per `--cwd` repository root.
+- Unless `--sandbox` was given, default to a write-capable Codex run by adding `--write` unless the user explicitly asks for read-only behavior or only wants review, diagnosis, or research without edits.
 - Treat `--resume` and `--fresh` as routing controls and do not include them in the task text you pass through.
 - `--resume` means add `--resume-last`.
 - `--fresh` means do not add `--resume-last`.

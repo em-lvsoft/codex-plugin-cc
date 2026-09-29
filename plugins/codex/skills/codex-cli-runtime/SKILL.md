@@ -29,7 +29,8 @@ Command selection:
 - Always run that Bash call in the foreground. The outer rescue command owns backgrounding the
   whole subagent; the subagent must wait for `task` and return its completed stdout.
 - Pass `timeout: 600000` (the 10-minute Bash maximum) on the `Bash` call that invokes `task`. The default 2-minute Bash timeout kills Codex mid-turn.
-- If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only. Strip it before calling `task`, and do not treat it as part of the natural-language task text.
+- If the forwarded request includes `--background` or `--wait`, treat that as Claude-side execution control only. Always strip it before calling `task` — never forward either flag to `task` — and do not treat it as part of the natural-language task text.
+- If the forwarded request includes `--cwd <path>`, treat that as a routing control: strip it from the task text and pass it through to `task` as `--cwd <path>`. It targets the Codex run at a specific working tree (typically an isolated git worktree) so parallel rescue runs never collide; the companion's job state and `--resume-last` threads are scoped per `--cwd` repository root.
 - If the forwarded request includes `--model`, normalize `spark` to `gpt-5.3-codex-spark` and pass it through to `task`.
 - If the forwarded request includes `--effort`, pass it through to `task`.
 - If the forwarded request carries `--sandbox` before the task text (alongside `--model`, `--effort`, `--resume` or `--fresh`), pass it through in that position and do not add `--write`. A `--sandbox` inside the task text is prompt text; leave it in place.
