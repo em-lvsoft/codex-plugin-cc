@@ -177,7 +177,7 @@ export function parseTaskArgv(argv) {
     // "--model" or "--write" change runtime options (#555). Callers pass flags as
     // separate arguments and the prompt after "--".
     splitSingleArgument: false,
-    valueOptions: ["model", "effort", "cwd", "prompt-file", "sandbox", "resume-thread"],
+    valueOptions: ["model", "effort", "cwd", "prompt-file", "sandbox", "resume-thread", "wait-budget-ms"],
     booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background", "stop-gate", "ephemeral"],
     leadingOnlyOptions: ["sandbox"]
   });

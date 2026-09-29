@@ -4072,3 +4072,41 @@ test("a completed ephemeral task cannot be picked up by a later --resume-last", 
   assert.equal(resume.status, 1);
   assert.match(resume.stderr, /No previous Codex task thread was found for this repository\./);
 });
+
+test("task that outlives the wait budget hands back a task id that status and result resolve", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "slow-task");
+  initGitRepo(repo);
+  fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
+  run("git", ["add", "README.md"], { cwd: repo });
+  run("git", ["commit", "-m", "init"], { cwd: repo });
+  const env = buildEnv(binDir);
+
+  // The run always executes in a detached worker; with the wait budget exhausted the CLI must
+  // hand back the COMPANION's job id (a harness-side timeout substitutes an id from its own
+  // namespace, which status/result cannot resolve — the failure this path exists to prevent).
+  const launch = run("node", [SCRIPT, "task", "--wait-budget-ms", "1", "slow thing"], {
+    cwd: repo,
+    env
+  });
+  assert.equal(launch.status, 0, launch.stderr);
+  const idMatch = launch.stdout.match(/still running as (task-[a-z0-9-]+)/);
+  assert.ok(idMatch, launch.stdout);
+  const jobId = idMatch[1];
+  assert.match(launch.stdout, new RegExp(`/codex:result ${jobId}`));
+
+  // The id must resolve through status --wait until the detached worker finishes...
+  const status = run(
+    "node",
+    [SCRIPT, "status", jobId, "--wait", "--timeout-ms", "30000", "--poll-interval-ms", "200"],
+    { cwd: repo, env }
+  );
+  assert.equal(status.status, 0, status.stderr);
+  assert.match(status.stdout, /completed/);
+
+  // ...and through result, carrying the run's real output.
+  const result = run("node", [SCRIPT, "result", jobId], { cwd: repo, env });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Handled the requested task/);
+});
