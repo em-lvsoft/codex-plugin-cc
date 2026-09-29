@@ -630,6 +630,13 @@ rl.on("line", (line) => {
         }
 
         const items = [
+          ...(BEHAVIOR === "file-change-started-without-changes"
+            ? [
+                {
+                  started: { type: "fileChange", id: "fc_" + turnId }
+                }
+              ]
+            : []),
           ...(BEHAVIOR === "with-reasoning"
             ? [
                 {
