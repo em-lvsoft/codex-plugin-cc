@@ -50,7 +50,7 @@ test("adversarial review command uses AskUserQuestion and background Bash while 
   assert.match(source, /```typescript/);
   assert.match(source, /adversarial-review "\$ARGUMENTS"/);
   assert.match(source, /\[--scope auto\|working-tree\|branch\]/);
-  assert.match(source, /\[--effort <none\|minimal\|low\|medium\|high\|xhigh>\] \[focus \.\.\.\]/);
+  assert.match(source, /\[--effort <none\|minimal\|low\|medium\|high\|xhigh\|max\|ultra>\] \[focus \.\.\.\]/);
   assert.match(source, /run_in_background:\s*true/);
   assert.match(source, /command:\s*`node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/codex-companion\.mjs" adversarial-review "\$ARGUMENTS"`/);
   assert.match(source, /description:\s*"Codex adversarial review"/);
@@ -209,12 +209,31 @@ test("transfer, result, and cancel commands are exposed as deterministic runtime
   assert.match(resultHandling, /if Codex was never successfully invoked, do not generate a substitute answer at all/i);
 });
 
+test("rescue agent always forwards, waits, and passes the prompt safely", () => {
+  const agent = read("agents/codex-rescue.md");
+  const runtimeSkill = read("skills/codex-cli-runtime/SKILL.md");
+
+  assert.match(agent, /You MUST invoke the Bash `task` call exactly once for every invocation/);
+  assert.match(agent, /timeout: 600000/);
+  assert.match(runtimeSkill, /timeout: 600000/);
+  assert.match(agent, /Always run that Bash call in the foreground/);
+  assert.match(agent, /Do not write prompt files to disk/i);
+  assert.match(agent, /Do not poll, `pgrep`/i);
+  assert.match(agent, /task \[runtime options\] -- '<prompt>'/);
+  assert.match(agent, /escape every embedded single quote as `'\\''`.*Never wrap the prompt in double quotes/i);
+  assert.match(agent, /do not invent a job ID or suggest a `\/codex:status` command for it/i);
+  assert.match(runtimeSkill, /Do not write prompt files to disk/i);
+  assert.match(runtimeSkill, /Do not poll, `pgrep`/i);
+  assert.match(runtimeSkill, /escape every embedded single quote as `'\\''`.*Never wrap the prompt in double quotes/i);
+  assert.match(runtimeSkill, /do not invent a job ID or suggest a `\/codex:status` command for it/i);
+});
+
 test("internal docs use task terminology for rescue runs", () => {
   const runtimeSkill = read("skills/codex-cli-runtime/SKILL.md");
   const promptingSkill = read("skills/gpt-5-4-prompting/SKILL.md");
   const promptRecipes = read("skills/gpt-5-4-prompting/references/codex-prompt-recipes.md");
 
-  assert.match(runtimeSkill, /codex-companion\.mjs" task \[runtime flags\] -- "<raw prompt>"/);
+  assert.match(runtimeSkill, /codex-companion\.mjs" task \[runtime options\] -- '<prompt>'/);
   assert.match(runtimeSkill, /Use `task` for every rescue request/i);
   assert.match(runtimeSkill, /task --resume-last/i);
   assert.match(promptingSkill, /Use `task` when the task is diagnosis/i);
@@ -269,27 +288,29 @@ test("setup command can offer Codex install and still points users to codex logi
 
 test("adversarial-review documents and parses --model and --effort", () => {
   const companion = read("scripts/codex-companion.mjs");
+  const args = read("scripts/lib/args.mjs");
   // The review path must parse both runtime-selection flags, not just --model.
+  // The option schema lives in lib/args.mjs (parseReviewArgv).
   assert.match(
-    companion,
+    args,
     /valueOptions: \["base", "scope", "model", "cwd", "effort"\]/,
     "handleReviewCommand must accept --effort"
   );
   // ...and thread effort through to the turn, or parsing it changes nothing.
   assert.match(companion, /effort: normalizeReasoningEffort\(options\.effort\)/);
-  assert.match(companion, /effort: request\.effort,\n\s*sandbox: "read-only"/);
+  assert.match(companion, /effort: request\.effort,\r?\n\s*sandbox: "read-only"/);
   // The usage advertises --model <model|spark>, so the review path must resolve the alias
   // the same way the task path does. Forwarding options.model raw sends the literal
   // "spark" to turn/start instead of gpt-5.3-codex-spark.
   assert.match(
     companion,
-    /model: normalizeRequestedModel\(options\.model\),\n\s*effort: normalizeReasoningEffort\(options\.effort\)/,
+    /model: normalizeRequestedModel\(options\.model\),\r?\n\s*effort: normalizeReasoningEffort\(options\.effort\)/,
     "handleReviewCommand must normalize --model, not forward it raw"
   );
 
   const usage = companion.match(/adversarial-review \[[^\n"]*/)?.[0] ?? "";
-  assert.match(usage, /--effort <none\|minimal\|low\|medium\|high\|xhigh>/);
+  assert.match(usage, /--effort <none\|minimal\|low\|medium\|high\|xhigh\|max\|ultra>/);
 
   const cmd = read("commands/adversarial-review.md");
-  assert.match(cmd, /--effort <none\|minimal\|low\|medium\|high\|xhigh>/);
+  assert.match(cmd, /--effort <none\|minimal\|low\|medium\|high\|xhigh\|max\|ultra>/);
 });
