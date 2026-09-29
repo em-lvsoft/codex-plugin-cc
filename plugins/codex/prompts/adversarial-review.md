@@ -56,7 +56,7 @@ Keep the output compact and specific.
 Use `needs-attention` if there is any material risk worth blocking on.
 Use `approve` only if you cannot support any substantive adversarial finding from the provided context.
 Every finding object must contain exactly these eight keys:
-- `severity`: one of `low`, `medium`, `high`
+- `severity`: one of `critical`, `high`, `medium`, `low`
 - `title`: a short one-line label
 - `body`: the explanation, including any inference it depends on
 - `file`: the affected file
