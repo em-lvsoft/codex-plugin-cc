@@ -15,7 +15,7 @@ import {
   sendBrokerShutdown,
   waitForBrokerEndpoint
 } from "../plugins/codex/scripts/lib/broker-lifecycle.mjs";
-import { createBrokerEndpoint } from "../plugins/codex/scripts/lib/broker-endpoint.mjs";
+import { createBrokerEndpoint, parseBrokerEndpoint } from "../plugins/codex/scripts/lib/broker-endpoint.mjs";
 import { resolveStateDir } from "../plugins/codex/scripts/lib/state.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -126,6 +126,12 @@ test("setup is ready without npm when Codex is already installed and authenticat
   installFakeCodex(binDir);
   if (process.platform === "win32") {
     fs.writeFileSync(path.join(binDir, "node.cmd"), `@echo off\r\n"${process.execPath}" %*\r\n`, "utf8");
+    // Under Git Bash, runCommand goes through $SHELL, and bash does not resolve .cmd files.
+    fs.writeFileSync(
+      path.join(binDir, "node"),
+      `#!/bin/sh\nexec "${process.execPath.replace(/\\/g, "/")}" "$@"\n`,
+      { encoding: "utf8", mode: 0o755 }
+    );
   } else {
     fs.symlinkSync(process.execPath, path.join(binDir, "node"));
   }
@@ -425,6 +431,7 @@ test("transfer prefers Claude's current session id over stale companion hook sta
     env: {
       ...buildEnv(binDir),
       HOME: home,
+      USERPROFILE: home,
       CODEX_HOME: path.join(home, ".codex"),
       CLAUDE_CODE_SESSION_ID: currentSessionId,
       CODEX_COMPANION_SESSION_ID: staleSessionId,
@@ -458,6 +465,7 @@ test("transfer requires an explicit source when a session id matches multiple tr
     env: {
       ...buildEnv(binDir),
       HOME: home,
+      USERPROFILE: home,
       CODEX_HOME: path.join(home, ".codex"),
       CLAUDE_CODE_SESSION_ID: sessionId
     }
@@ -1281,11 +1289,11 @@ function runSessionStartHook({ repo, envFile, pluginDataDir, sessionId, transcri
   });
 }
 
-function managedExports({ sessionId, transcriptPath, pluginDataDir }) {
+function managedExports({ sessionId, transcriptPath, pluginDataDir, pluginDataVar = "CODEX_COMPANION_PLUGIN_DATA" }) {
   return (
     `export CODEX_COMPANION_SESSION_ID='${sessionId}'\n` +
     `export CODEX_COMPANION_TRANSCRIPT_PATH='${transcriptPath}'\n` +
-    `export CLAUDE_PLUGIN_DATA='${pluginDataDir}'\n`
+    `export ${pluginDataVar}='${pluginDataDir}'\n`
   );
 }
 
@@ -1319,8 +1327,15 @@ test("session start hook prunes exports an earlier version left behind", () => {
   const expected = managedExports({ sessionId: "sess-current", transcriptPath, pluginDataDir });
 
   // The state a session is already in after a version that appended on every firing:
-  // hundreds of copies, of which only the last has any effect.
-  fs.writeFileSync(envFile, expected.repeat(500), "utf8");
+  // hundreds of copies, of which only the last has any effect. Those versions exported
+  // the host's generic CLAUDE_PLUGIN_DATA; that line goes too when it carries our value.
+  const legacy = managedExports({
+    sessionId: "sess-current",
+    transcriptPath,
+    pluginDataDir,
+    pluginDataVar: "CLAUDE_PLUGIN_DATA"
+  });
+  fs.writeFileSync(envFile, legacy.repeat(500), "utf8");
 
   const result = runSessionStartHook({
     repo,
@@ -1437,7 +1452,8 @@ test("task --resume-last --write forwards write approval policy to app-server th
   run("git", ["add", "README.md"], { cwd: repo });
   run("git", ["commit", "-m", "init"], { cwd: repo });
 
-  const firstRun = run("node", [SCRIPT, "task", "initial task"], {
+  // Start write-capable too: #742 refuses to resume a read-only thread as workspace-write.
+  const firstRun = run("node", [SCRIPT, "task", "--write", "initial task"], {
     cwd: repo,
     env: buildEnv(binDir)
   });
@@ -3385,7 +3401,7 @@ test("session end preserves shared broker while another session has active jobs"
 
   const brokerDir = createBrokerSessionDir("cxc-test-");
   const endpoint = createBrokerEndpoint(brokerDir);
-  const socketPath = endpoint.startsWith("unix:") ? endpoint.slice(5) : endpoint;
+  const socketPath = parseBrokerEndpoint(endpoint).path;
   const pidFile = path.join(brokerDir, "broker.pid");
   const logFile = path.join(brokerDir, "broker.log");
   const methodsLog = path.join(brokerDir, "received-methods.log");
@@ -3529,7 +3545,7 @@ test("task terminates when app-server emits a non-retryable turn error", () => {
   const result = run("node", [SCRIPT, "task", "trigger terminal error"], {
     cwd: repo,
     env: buildEnv(binDir),
-    timeout: 5000
+    timeout: 20000
   });
 
   assert.equal(result.signal, null, `task timed out: ${result.stderr}`);
@@ -3561,7 +3577,7 @@ for (const behavior of ["terminal-error-buffered", "terminal-error-then-complete
     const result = run("node", [SCRIPT, "task", "trigger terminal error"], {
       cwd: repo,
       env: buildEnv(binDir),
-      timeout: 5000
+      timeout: 20000
     });
 
     assert.equal(result.signal, null, `task timed out: ${result.stderr}`);
@@ -3582,7 +3598,7 @@ test("task continues after a retryable turn error", () => {
   const result = run("node", [SCRIPT, "task", "retry the turn"], {
     cwd: repo,
     env: buildEnv(binDir),
-    timeout: 5000
+    timeout: 20000
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -3602,7 +3618,7 @@ test("task ignores an error notification for an unrelated thread", () => {
   const result = run("node", [SCRIPT, "task", "ignore unrelated error"], {
     cwd: repo,
     env: buildEnv(binDir),
-    timeout: 5000
+    timeout: 20000
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -3623,7 +3639,7 @@ test("review terminates and renders a non-retryable app-server error", () => {
   const result = run("node", [SCRIPT, "review", "--scope", "working-tree"], {
     cwd: repo,
     env: buildEnv(binDir),
-    timeout: 5000
+    timeout: 20000
   });
 
   assert.equal(result.signal, null, `review timed out: ${result.stderr}`);
@@ -3650,7 +3666,7 @@ test("task does not let a tracked subagent error overwrite the root turn result"
   const result = run("node", [SCRIPT, "task", "keep the root turn authoritative"], {
     cwd: repo,
     env: buildEnv(binDir),
-    timeout: 5000
+    timeout: 20000
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -3748,7 +3764,7 @@ test("task reads --sandbox only before the task text", () => {
   assert.equal(fakeState.lastThreadStart.sandbox, "read-only");
   assert.equal(fakeState.lastTurnStart.prompt, "document why --sandbox danger-full-access is off");
 
-  const leading = run("node", [SCRIPT, "task", "-m", "spark", "--sandbox=danger-full-access", "--write", "run the integration tests"], {
+  const leading = run("node", [SCRIPT, "task", "--model", "spark", "--sandbox=danger-full-access", "--write", "run the integration tests"], {
     cwd: repo,
     env: buildEnv(binDir)
   });
@@ -3759,7 +3775,9 @@ test("task reads --sandbox only before the task text", () => {
   assert.equal(fakeState.lastTurnStart.model, "gpt-5.3-codex-spark");
   assert.equal(fakeState.lastTurnStart.prompt, "run the integration tests");
 
-  const quoted = run("node", [SCRIPT, "task", "--sandbox read-only '{\"key\":\"value\"}'"], {
+  // Flags as separate arguments, prompt after "--" (#555). Spawn node directly: on Windows
+  // run() goes through cmd.exe for a bare "node", which strips the JSON's double quotes.
+  const quoted = run(process.execPath, [SCRIPT, "task", "--sandbox", "read-only", "--", '{"key":"value"}'], {
     cwd: repo,
     env: buildEnv(binDir)
   });

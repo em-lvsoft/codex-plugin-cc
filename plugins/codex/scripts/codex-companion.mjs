@@ -76,6 +76,9 @@ const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 // background-command namespace, which status/result cannot resolve.
 const DEFAULT_TASK_WAIT_BUDGET_MS = 540000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
+// A foreground task waits on its detached worker; poll quickly so the result comes back
+// as soon as the worker records it instead of up to a status-poll interval later.
+const TASK_WAIT_POLL_INTERVAL_MS = 250;
 const VALID_REASONING_EFFORTS = new Set([
   "none",
   "minimal",
@@ -648,7 +651,7 @@ async function waitForTaskCompletion(cwd, jobId, { timeoutMs, logFile, stderr })
   let snapshot = buildSingleJobSnapshot(cwd, jobId);
   while (isActiveJobStatus(snapshot.job.status) && Date.now() < deadline) {
     tail();
-    await sleep(Math.min(DEFAULT_STATUS_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
+    await sleep(Math.min(TASK_WAIT_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
     snapshot = buildSingleJobSnapshot(cwd, jobId);
   }
   if (!isActiveJobStatus(snapshot.job.status)) {
