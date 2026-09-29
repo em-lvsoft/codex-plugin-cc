@@ -197,7 +197,17 @@ async function main() {
     }
   }
 
+  // Tracks whether `shutdown()` is running so the upstream-exit watchdog
+  // below can tell intentional teardown (`broker/shutdown`, SIGTERM, SIGINT)
+  // apart from the upstream app-server dying on its own. Both paths resolve
+  // `appClient.exitPromise` via `appClient.close()`; without this flag the
+  // watchdog would re-enter `shutdown()` during graceful teardown and race
+  // `process.exit(0)` with `process.exit(1)`.
+  let shuttingDown = false;
+
   async function shutdown(server) {
+    shuttingDown = true;
+    disarmIdleTimer();
     // Stop accepting FIRST. server.close() stops listening immediately and resolves once
     // existing connections drain. Tearing down the app server first would leave the
     // endpoint accepting throughout that await, so ensureBrokerSession's readiness probe
@@ -217,6 +227,26 @@ async function main() {
   }
 
   appClient.setNotificationHandler(routeNotification);
+
+  // Propagate upstream codex app-server exit so connected clients see a
+  // socket EOF instead of waiting forever for a turn/completed. Without
+  // this, a codex CLI crash (rate limit, OOM, internal error) leaves the
+  // broker idle-alive: the socket to each client stays open but no more
+  // notifications ever arrive, so `captureTurn` hangs. Closing the server
+  // triggers the client-side `exitPromise` resolution path that
+  // `captureTurn` now uses as a watchdog.
+  //
+  // The `shuttingDown` guard is required — `shutdown()` itself closes
+  // `appClient`, which resolves the same `exitPromise` this handler is
+  // listening on. Without the guard, every graceful termination would
+  // trigger this watchdog, re-enter `shutdown()`, and race the intentional
+  // `process.exit(0)` with `process.exit(1)`.
+  appClient.exitPromise.then(() => {
+    if (shuttingDown) {
+      return;
+    }
+    shutdown(server).catch(() => {}).finally(() => process.exit(1));
+  });
 
   const server = net.createServer((socket) => {
     disarmIdleTimer();
