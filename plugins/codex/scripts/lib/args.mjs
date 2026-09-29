@@ -172,7 +172,7 @@ export function parseCommandInput(argv, config = {}) {
 export function parseTaskArgv(argv) {
   return parseCommandInput(argv, {
     valueOptions: ["model", "effort", "cwd", "prompt-file", "sandbox", "resume-thread"],
-    booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background", "stop-gate"],
+    booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background", "stop-gate", "ephemeral"],
     leadingOnlyOptions: ["sandbox"]
   });
 }
