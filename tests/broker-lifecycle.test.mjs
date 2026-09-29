@@ -18,7 +18,8 @@ import { createBrokerEndpoint, parseBrokerEndpoint } from "../plugins/codex/scri
 import { resolveStateDir } from "../plugins/codex/scripts/lib/state.mjs";
 
 test("sendBrokerShutdown returns when a broker accepts but never replies", async (t) => {
-  const socketPath = path.join(makeTempDir(), "broker.sock");
+  const endpoint = createBrokerEndpoint(makeTempDir());
+  const socketPath = parseBrokerEndpoint(endpoint).path;
   const sockets = new Set();
   const server = net.createServer((socket) => {
     sockets.add(socket);
@@ -28,11 +29,13 @@ test("sendBrokerShutdown returns when a broker accepts but never replies", async
   t.after(() => {
     for (const socket of sockets) socket.destroy();
     server.close();
-    fs.rmSync(path.dirname(socketPath), { recursive: true, force: true });
+    if (endpoint.startsWith("unix:")) {
+      fs.rmSync(path.dirname(socketPath), { recursive: true, force: true });
+    }
   });
 
   const startedAt = Date.now();
-  await sendBrokerShutdown(`unix:${socketPath}`, 50);
+  await sendBrokerShutdown(endpoint, 50);
   assert.ok(Date.now() - startedAt < 500);
 });
 

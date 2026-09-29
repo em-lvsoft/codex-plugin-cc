@@ -23,14 +23,18 @@ test("task prompt keeps `-m` tokens instead of hijacking --model", () => {
 });
 
 test("bare `-m value` in a task prompt no longer sets the model", () => {
-  const { options, positionals } = parseTaskArgv(["-m pytest"]);
+  // A single argument is the prompt, verbatim (#555): it is not re-split.
+  const single = parseTaskArgv(["-m pytest"]);
+  assert.equal(single.options.model, undefined);
+  assert.deepEqual(single.positionals, ["-m pytest"]);
 
-  assert.equal(options.model, undefined);
-  assert.deepEqual(positionals, ["-m", "pytest"]);
+  const split = parseTaskArgv(["-m", "pytest"]);
+  assert.equal(split.options.model, undefined);
+  assert.deepEqual(split.positionals, ["-m", "pytest"]);
 });
 
 test("task still honors the documented long --model flag", () => {
-  const { options, positionals } = parseTaskArgv(["--model spark do the thing"]);
+  const { options, positionals } = parseTaskArgv(["--model", "spark", "--", "do the thing"]);
 
   assert.equal(options.model, "spark");
   assert.equal(positionals.join(" "), "do the thing");
@@ -38,12 +42,22 @@ test("task still honors the documented long --model flag", () => {
 
 test("task boolean flags still parse alongside a prompt", () => {
   const { options, positionals } = parseTaskArgv([
-    "--background --write refactor the payment module"
+    "--background",
+    "--write",
+    "--",
+    "refactor the payment module"
   ]);
 
   assert.equal(options.background, true);
   assert.equal(options.write, true);
   assert.equal(positionals.join(" "), "refactor the payment module");
+});
+
+test("a single task argument is the prompt, even when it looks like flags", () => {
+  const { options, positionals } = parseTaskArgv(["--write refactor C:\\src\\app.js"]);
+
+  assert.equal(options.write, undefined);
+  assert.deepEqual(positionals, ["--write refactor C:\\src\\app.js"]);
 });
 
 test("review focus text keeps `-m` tokens but still honors --model", () => {

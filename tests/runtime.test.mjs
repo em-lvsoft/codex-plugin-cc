@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test, { after } from "node:test";
+import test, { after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
-import { cleanupTempWorkspaces, initGitRepo, makeTempDir, run } from "./helpers.mjs";
+import { cleanupTempWorkspaces, initGitRepo, makeTempDir, run, stopTempBrokers } from "./helpers.mjs";
 import {
   createBrokerSessionDir,
   loadBrokerSession,
@@ -50,6 +50,10 @@ function readRootBrokerPid() {
     return null;
   }
 }
+
+afterEach(() => {
+  stopTempBrokers();
+});
 
 after(() => {
   const rootBrokerPidAfterRun = readRootBrokerPid();

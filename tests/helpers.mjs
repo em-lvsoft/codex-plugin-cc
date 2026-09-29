@@ -83,6 +83,17 @@ export function stopBrokerFor(cwd) {
 }
 
 /**
+ * Stop the brokers of every workspace handed out so far, keeping the directories.
+ * Run after each test so brokers do not pile up over a long suite: each one is an
+ * idle node process plus its app-server child until the suite ends.
+ */
+export function stopTempBrokers() {
+  for (const cwd of tempDirs) {
+    stopBrokerFor(cwd);
+  }
+}
+
+/**
  * Tear down every workspace created by makeTempDir: stop its broker, then
  * remove the directory. Extra workspaces (for example the repository root,
  * which some tests use as the companion cwd) can be passed in.

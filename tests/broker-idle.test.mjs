@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { makeTempDir } from "./helpers.mjs";
 import { buildEnv, installFakeCodex } from "./fake-codex-fixture.mjs";
+import { createBrokerEndpoint, parseBrokerEndpoint } from "../plugins/codex/scripts/lib/broker-endpoint.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const BROKER = path.join(ROOT, "plugins", "codex", "scripts", "app-server-broker.mjs");
@@ -32,10 +33,12 @@ function startBroker({ idleTimeout } = {}) {
   installFakeCodex(binDir);
   const sessionDir = makeTempDir("codex-broker-idle-");
   const cwd = makeTempDir("codex-broker-cwd-");
-  const socketPath = path.join(sessionDir, "broker.sock");
+  // Unix socket on POSIX, named pipe on Windows; fs.existsSync works for both.
+  const endpoint = createBrokerEndpoint(sessionDir);
+  const socketPath = parseBrokerEndpoint(endpoint).path;
   const pidFile = path.join(sessionDir, "broker.pid");
 
-  const args = [BROKER, "serve", "--endpoint", `unix:${socketPath}`, "--cwd", cwd, "--pid-file", pidFile];
+  const args = [BROKER, "serve", "--endpoint", endpoint, "--cwd", cwd, "--pid-file", pidFile];
   if (idleTimeout !== undefined) {
     args.push("--idle-timeout", String(idleTimeout));
   }
@@ -128,7 +131,11 @@ test("broker with --idle-timeout 0 never idles out", async (t) => {
   const result = await broker.exitedWithin(8000);
   assert.ok(result, "broker did not exit on SIGTERM");
   assert.equal(fs.existsSync(broker.socketPath), false, "SIGTERM shutdown left the socket behind");
-  assert.equal(fs.existsSync(broker.pidFile), false, "SIGTERM shutdown left the pidfile behind");
+  // On Windows child.kill() terminates the process outright, so no shutdown handler
+  // runs and nothing can remove the pidfile.
+  if (process.platform !== "win32") {
+    assert.equal(fs.existsSync(broker.pidFile), false, "SIGTERM shutdown left the pidfile behind");
+  }
 });
 
 test("broker rejects a non-numeric --idle-timeout instead of silently never expiring", async (t) => {
