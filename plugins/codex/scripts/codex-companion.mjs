@@ -91,7 +91,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh|max|ultra>] [focus text]",
-      "  node scripts/codex-companion.mjs task [--background] [--write] [--ephemeral] [--sandbox <read-only|workspace-write|danger-full-access>] [--resume-last|--resume|--resume-thread <id>|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh|max|ultra>] [prompt]",
+      "  node scripts/codex-companion.mjs task [--background] [--write] [--ephemeral] [--sandbox <read-only|workspace-write|danger-full-access>] [--resume-last|--resume|--resume-thread <id>|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh|max|ultra>] [--prompt-file <path>|-- <prompt>]",
       "    --ephemeral: run without persisting the Codex thread. Ephemeral tasks cannot be resumed and do not appear in Codex Recent. Cannot be combined with --resume/--resume-last/--resume-thread.",
       "  node scripts/codex-companion.mjs transfer [--source <claude-jsonl>] [--json]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",

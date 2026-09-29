@@ -142,8 +142,8 @@ export function splitRawArgumentString(raw) {
 // A companion subcommand is often invoked with the whole request as a single
 // argument (e.g. `codex-companion.mjs task "fix the flaky test"`). Shell-split it
 // so option parsing sees individual tokens; a multi-argument argv is passed through.
-export function normalizeArgv(argv) {
-  if (argv.length === 1) {
+export function normalizeArgv(argv, options = {}) {
+  if (options.splitSingleArgument !== false && argv.length === 1) {
     const [raw] = argv;
     if (!raw || !raw.trim()) {
       return [];
@@ -154,11 +154,12 @@ export function normalizeArgv(argv) {
 }
 
 export function parseCommandInput(argv, config = {}) {
-  return parseArgs(normalizeArgv(argv), {
-    ...config,
+  const { splitSingleArgument, ...parseConfig } = config;
+  return parseArgs(normalizeArgv(argv, { splitSingleArgument }), {
+    ...parseConfig,
     aliasMap: {
       C: "cwd",
-      ...(config.aliasMap ?? {})
+      ...(parseConfig.aliasMap ?? {})
     }
   });
 }
@@ -171,6 +172,11 @@ export function parseCommandInput(argv, config = {}) {
 // prompt. Only the documented long `--model` form selects a model. See #699.
 export function parseTaskArgv(argv) {
   return parseCommandInput(argv, {
+    // A task prompt is free text, not a shell command line. Re-tokenizing a single
+    // prompt argument strips quotes/backslashes (Windows paths) and lets prose such as
+    // "--model" or "--write" change runtime options (#555). Callers pass flags as
+    // separate arguments and the prompt after "--".
+    splitSingleArgument: false,
     valueOptions: ["model", "effort", "cwd", "prompt-file", "sandbox", "resume-thread"],
     booleanOptions: ["json", "write", "resume-last", "resume", "fresh", "background", "stop-gate", "ephemeral"],
     leadingOnlyOptions: ["sandbox"]
