@@ -292,7 +292,7 @@ function describeStartedItem(state, item) {
     case "mcpToolCall":
       return { message: `Calling ${item.server}/${item.tool}.`, phase: "investigating" };
     case "dynamicToolCall":
-      return { message: `Running tool: ${item.tool}.`, phase: "investigating" };
+      return { message: `Running tool: ${item.tool}.`, phase: "investigating", hideFromStderr: true };
     case "collabAgentToolCall": {
       const subagents = (item.receiverThreadIds ?? []).map((threadId) => labelForThread(state, threadId) ?? threadId);
       const summary =
@@ -323,7 +323,7 @@ function describeCompletedItem(state, item) {
     case "mcpToolCall":
       return { message: `Tool ${item.server}/${item.tool} ${item.status}.`, phase: "investigating" };
     case "dynamicToolCall":
-      return { message: `Tool ${item.tool} ${item.status}.`, phase: "investigating" };
+      return { message: `Tool ${item.tool} ${item.status}.`, phase: "investigating", hideFromStderr: true };
     case "collabAgentToolCall": {
       const subagents = (item.receiverThreadIds ?? []).map((threadId) => labelForThread(state, threadId) ?? threadId);
       const summary =
@@ -594,14 +594,18 @@ function applyTurnNotification(state, message) {
       recordItem(state, message.params.item, "started", message.params.threadId ?? null);
       {
         const update = describeStartedItem(state, message.params.item);
-        emitProgress(state.onProgress, update?.message, update?.phase ?? null);
+        emitProgress(state.onProgress, update?.message, update?.phase ?? null, {
+          hideFromStderr: update?.hideFromStderr === true
+        });
       }
       break;
     case "item/completed":
       recordItem(state, message.params.item, "completed", message.params.threadId ?? null);
       {
         const update = describeCompletedItem(state, message.params.item);
-        emitProgress(state.onProgress, update?.message, update?.phase ?? null);
+        emitProgress(state.onProgress, update?.message, update?.phase ?? null, {
+          hideFromStderr: update?.hideFromStderr === true
+        });
       }
       break;
     case "error": {

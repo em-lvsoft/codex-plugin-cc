@@ -706,6 +706,22 @@ rl.on("line", (line) => {
                 }
               ]
             : []),
+          ...(BEHAVIOR === "noisy-tool-progress"
+            ? Array.from({ length: 100 }, (_, index) => ({
+                started: {
+                  type: "dynamicToolCall",
+                  id: "tool_started_" + turnId + "_" + index,
+                  tool: index % 2 === 0 ? "Read" : "Bash",
+                  status: "inProgress"
+                },
+                completed: {
+                  type: "dynamicToolCall",
+                  id: "tool_completed_" + turnId + "_" + index,
+                  tool: index % 2 === 0 ? "Read" : "Bash",
+                  status: "completed"
+                }
+              }))
+            : []),
           ...(BEHAVIOR === "with-reasoning"
             ? [
                 {
