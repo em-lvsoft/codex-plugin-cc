@@ -420,9 +420,15 @@ async function executeReviewRun(request) {
     outputSchema: readOutputSchema(REVIEW_SCHEMA),
     onProgress: request.onProgress
   });
+  const failureMessage =
+    result.error?.message?.trim() ||
+    result.stderr?.trim() ||
+    (result.status === 0
+      ? ""
+      : `Codex turn ended with status ${result.turn?.status ?? result.status} before returning a final review verdict.`);
   const parsed = parseStructuredOutput(result.finalMessage, {
     status: result.status,
-    failureMessage: result.error?.message ?? result.stderr
+    failureMessage
   });
   const failureMessage = result.error?.message ?? result.stderr ?? parsed.parseError ?? "";
   const payload = {
@@ -436,6 +442,7 @@ async function executeReviewRun(request) {
     },
     codex: {
       status: result.status,
+      error: failureMessage || null,
       stderr: result.stderr,
       stdout: result.finalMessage,
       reasoning: result.reasoningSummary

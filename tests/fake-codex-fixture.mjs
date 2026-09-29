@@ -516,6 +516,42 @@ rl.on("line", (line) => {
           send({ method: "turn/completed", params: { threadId: subThread.id, turn: buildTurn(subTurnId, "failed", terminalError) } });
         }
 
+        if (BEHAVIOR === "adversarial-turn-fails-after-progress") {
+          const interimPayload = JSON.stringify({
+            verdict: "approve",
+            summary: "I am splitting the audit into independent review tracks.",
+            findings: [],
+            next_steps: []
+          });
+          send({ method: "turn/started", params: { threadId: thread.id, turn: buildTurn(turnId) } });
+          send({
+            method: "item/completed",
+            params: {
+              threadId: thread.id,
+              turnId,
+              item: { type: "agentMessage", id: "msg_" + turnId, text: interimPayload, phase: "analysis" }
+            }
+          });
+          send({
+            method: "error",
+            params: {
+              threadId: thread.id,
+              turnId,
+              error: { message: "No tool output found for custom tool call call_test." }
+            }
+          });
+          send({
+            method: "turn/completed",
+            params: {
+              threadId: thread.id,
+              turn: buildTurn(turnId, "failed", {
+                message: "No tool output found for custom tool call call_test."
+              })
+            }
+          });
+          break;
+        }
+
         const payload = message.params.outputSchema && message.params.outputSchema.properties && message.params.outputSchema.properties.verdict
           ? structuredReviewPayload(prompt)
           : taskPayload(prompt, thread.name && thread.name.startsWith("Codex Companion Task") && prompt.includes("Continue from the current thread state"));
