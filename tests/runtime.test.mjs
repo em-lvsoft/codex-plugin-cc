@@ -4110,3 +4110,114 @@ test("task that outlives the wait budget hands back a task id that status and re
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Handled the requested task/);
 });
+
+test("setup falls back directly when the shared broker is busy", async (t) => {
+  const binDir = makeTempDir();
+  const fakeStatePath = path.join(binDir, "fake-codex-state.json");
+  installFakeCodex(binDir);
+  const broker = await startFakeAuthBroker(t);
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: {
+      ...buildEnv(binDir),
+      CODEX_COMPANION_APP_SERVER_ENDPOINT: broker.endpoint
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ready, true);
+  assert.equal(payload.auth.loggedIn, true);
+  assert.equal(payload.auth.detail, "ChatGPT login active for test@example.com");
+  assert.equal(JSON.parse(fs.readFileSync(fakeStatePath, "utf8")).appServerStarts, 1);
+});
+
+test("setup preserves a direct logged-out response after a busy broker fallback", async (t) => {
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "logged-out");
+  const broker = await startFakeAuthBroker(t);
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: {
+      ...buildEnv(binDir),
+      CODEX_COMPANION_APP_SERVER_ENDPOINT: broker.endpoint
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ready, false);
+  assert.equal(payload.auth.loggedIn, false);
+  assert.equal(payload.auth.detail, "OpenAI requires OpenAI authentication");
+});
+
+test("setup falls back directly when the requested broker endpoint is stale", () => {
+  const binDir = makeTempDir();
+  const fakeStatePath = path.join(binDir, "fake-codex-state.json");
+  const sessionDir = makeTempDir("codex-plugin-stale-auth-broker-");
+  installFakeCodex(binDir);
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: {
+      ...buildEnv(binDir),
+      CODEX_COMPANION_APP_SERVER_ENDPOINT: createBrokerEndpoint(sessionDir)
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ready, true);
+  assert.equal(payload.auth.loggedIn, true);
+  assert.equal(JSON.parse(fs.readFileSync(fakeStatePath, "utf8")).appServerStarts, 1);
+});
+
+test("setup does not retry a non-retryable broker auth failure", async (t) => {
+  const binDir = makeTempDir();
+  const fakeStatePath = path.join(binDir, "fake-codex-state.json");
+  installFakeCodex(binDir);
+  const broker = await startFakeAuthBroker(t, "error");
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: {
+      ...buildEnv(binDir),
+      CODEX_COMPANION_APP_SERVER_ENDPOINT: broker.endpoint
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ready, false);
+  assert.equal(payload.auth.loggedIn, false);
+  assert.equal(payload.auth.detail, "Broker auth request failed.");
+  assert.equal(fs.existsSync(fakeStatePath), false);
+});
+
+test("setup reports a direct auth failure and closes both fallback clients", async (t) => {
+  const binDir = makeTempDir();
+  const fakeStatePath = path.join(binDir, "fake-codex-state.json");
+  installFakeCodex(binDir, "config-read-fails");
+  const broker = await startFakeAuthBroker(t);
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: {
+      ...buildEnv(binDir),
+      CODEX_COMPANION_APP_SERVER_ENDPOINT: broker.endpoint
+    }
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ready, false);
+  assert.equal(payload.auth.loggedIn, false);
+  assert.equal(payload.auth.detail, "config/read failed for cwd");
+
+  await waitFor(() => JSON.parse(fs.readFileSync(broker.statePath, "utf8")).closedConnections === 1);
+  const directState = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
+  assert.equal(directState.appServerStarts, 1);
+  assert.equal(directState.appServerExits, 1);
+});
