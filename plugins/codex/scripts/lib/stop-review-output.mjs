@@ -1,4 +1,5 @@
-const STOP_REVIEW_FALLBACK = "Run /codex:review --wait manually or bypass the gate.";
+const STOP_REVIEW_FALLBACK =
+  "Run /codex:review --wait manually, or turn the gate off with /codex:setup --disable-review-gate.";
 const MAX_DIAGNOSTIC_CHARS = 4000;
 
 function diagnosticText(value) {

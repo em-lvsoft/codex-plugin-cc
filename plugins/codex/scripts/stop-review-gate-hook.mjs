@@ -81,7 +81,7 @@ function runStopReview(cwd, input = {}) {
     return {
       ok: false,
       reason:
-        "The stop-time Codex review task timed out after 14 minutes. Run /codex:review --wait manually or bypass the gate."
+        "The stop-time Codex review task timed out after 14 minutes. Run /codex:review --wait manually, or turn the gate off with /codex:setup --disable-review-gate."
     };
   }
 

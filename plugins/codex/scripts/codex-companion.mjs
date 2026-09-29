@@ -527,7 +527,7 @@ async function executeTaskRun(request) {
     rawOutput,
     touchedFiles: result.touchedFiles,
     reasoningSummary: result.reasoningSummary,
-    ...(result.status !== 0 && result.error ? { error: result.error } : {})
+    ...(result.status !== 0 && (result.error || failureMessage) ? { error: result.error ?? failureMessage } : {})
   };
   const summary = shorten(
     firstMeaningfulLine((result.status !== 0 && failureMessage) || rawOutput, `${taskMetadata.title} finished.`),
