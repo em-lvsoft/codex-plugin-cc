@@ -77,10 +77,21 @@ export function loadState(cwd) {
   }
 }
 
+function isActiveJob(job) {
+  return job?.status === "queued" || job?.status === "running";
+}
+
 function pruneJobs(jobs) {
-  return [...jobs]
+  // Never evict an active (queued/running) job: it may belong to another
+  // session or a live background worker, and dropping its record hides it
+  // from the broker-ownership gate (letting a SessionEnd tear the broker
+  // down under it). Cap only the terminal history.
+  const active = jobs.filter(isActiveJob);
+  const terminal = [...jobs]
+    .filter((job) => !isActiveJob(job))
     .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))
-    .slice(0, MAX_JOBS);
+    .slice(0, Math.max(0, MAX_JOBS - active.length));
+  return [...active, ...terminal];
 }
 
 function removeFileIfExists(filePath) {
@@ -105,6 +116,12 @@ export function saveState(cwd, state) {
   const retainedIds = new Set(nextJobs.map((job) => job.id));
   for (const job of previousJobs) {
     if (retainedIds.has(job.id)) {
+      continue;
+    }
+    // Only GC files for jobs that are already terminal. If a job absent from
+    // this (possibly stale) snapshot is still active on disk, it belongs to a
+    // concurrent writer — deleting its .json/.log would strand a live worker.
+    if (isActiveJob(job)) {
       continue;
     }
     removeJobFile(resolveJobFile(cwd, job.id));
@@ -188,4 +205,17 @@ export function resolveJobLogFile(cwd, jobId) {
 export function resolveJobFile(cwd, jobId) {
   ensureStateDir(cwd);
   return path.join(resolveJobsDir(cwd), `${jobId}.json`);
+}
+
+// Delete a job's on-disk artifacts (.json + .log). For callers that are
+// *intentionally* removing a specific job they own — e.g. SessionEnd cleaning
+// up its own killed jobs — since saveState's GC now refuses to unlink files
+// for active jobs (to protect concurrent sessions), the deliberate owner must
+// clean up its own artifacts explicitly.
+export function removeJobArtifacts(cwd, job) {
+  if (!job?.id) {
+    return;
+  }
+  removeJobFile(resolveJobFile(cwd, job.id));
+  removeFileIfExists(job.logFile);
 }
